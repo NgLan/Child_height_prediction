@@ -7,6 +7,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 import joblib
 import os
 import matplotlib.pyplot as plt
+from scipy.stats import mstats
 
 # Xác định đường dẫn
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -23,7 +24,7 @@ os.makedirs(figures_dir, exist_ok=True)
 data_file = os.path.join(data_dir, 'childhealth-dutch-female.csv')
 data = pd.read_csv(data_file)
 
-# Hàm phân loại trẻ dựa trên Z-score (đã sửa theo yêu cầu)
+# Hàm phân loại trẻ dựa trên Z-score
 def classify_child(row):
     if row['haz'] < -2 or row['waz'] < -2 or row['wlhz'] < -2:
         return 'Undernourished'
@@ -66,14 +67,27 @@ for feature in features:
 print("\nPhân bố lớp sau khi xử lý:")
 print(data['category'].value_counts())
 
-# Vẽ histogram của wtkg_per_agedays để kiểm tra phân phối
+# Vẽ histogram của wtkg_per_agedays trước khi Winsorization
 plt.figure(figsize=(10, 6))
 plt.hist(data['wtkg_per_agedays'], bins=50, edgecolor='k', alpha=0.7)
-plt.title('Phân phối của wtkg_per_agedays')
+plt.title('Phân phối của wtkg_per_agedays (Trước Winsorization)')
 plt.xlabel('wtkg_per_agedays')
 plt.ylabel('Số lượng')
-plt.savefig(os.path.join(figures_dir, 'wtkg_per_agedays_distribution.png'))
-plt.show()
+plt.savefig(os.path.join(figures_dir, 'wtkg_per_agedays_distribution_before.png'))
+plt.close()
+
+# Áp dụng Winsorization cho wtkg_per_agedays (giới hạn ở percentile 99)
+data['wtkg_per_agedays'] = mstats.winsorize(data['wtkg_per_agedays'], limits=[0, 0.01])
+print("\nSau Winsorization, wtkg_per_agedays - min:", data['wtkg_per_agedays'].min(), "max:", data['wtkg_per_agedays'].max())
+
+# Vẽ histogram của wtkg_per_agedays sau khi Winsorization
+plt.figure(figsize=(10, 6))
+plt.hist(data['wtkg_per_agedays'], bins=50, edgecolor='k', alpha=0.7)
+plt.title('Phân phối của wtkg_per_agedays (Sau Winsorization)')
+plt.xlabel('wtkg_per_agedays')
+plt.ylabel('Số lượng')
+plt.savefig(os.path.join(figures_dir, 'wtkg_per_agedays_distribution_after.png'))
+plt.close()
 
 # Chuẩn hóa đặc trưng
 scaler = StandardScaler()
@@ -115,7 +129,7 @@ grid_search = GridSearchCV(
     RandomForestClassifier(random_state=42),
     param_grid,
     cv=3,
-    scoring='f1_macro'  # Thay đổi scoring thành f1_macro để ưu tiên lớp thiểu số
+    scoring='f1_macro'  # Sử dụng f1_macro để ưu tiên lớp thiểu số
 )
 grid_search.fit(X_train, y_train)
 model = grid_search.best_estimator_
@@ -163,6 +177,10 @@ print(f"Lớp có precision thấp nhất: {min_precision_class[0]} (Precision: 
 # Tìm lớp có F1-score thấp nhất
 min_f1_class = min(report.items(), key=lambda x: x[1]['f1-score'] if x[0] in present_classes else float('inf'))
 print(f"Lớp có F1-score thấp nhất: {min_f1_class[0]} (F1-score: {min_f1_class[1]['f1-score']:.2f})")
+
+# Lưu ý về wtkg_per_agedays
+print("\nLưu ý: Kiểm tra độ quan trọng của đặc trưng 'wtkg_per_agedays' trong 'feature_importance_classification.png'.")
+print("Nếu độ quan trọng thấp (e.g., dưới 0.1), cân nhắc loại bỏ đặc trưng này để giảm nhiễu.")
 
 # Lưu mô hình, LabelEncoder, scaler và tập train/test
 model_file = os.path.join(models_dir, 'child_classification_model.pkl')

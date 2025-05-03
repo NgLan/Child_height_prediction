@@ -25,9 +25,10 @@ y_train_h = joblib.load(os.path.join(models_dir, 'y_train_height.pkl'))
 X_test_h = joblib.load(os.path.join(models_dir, 'X_test_height.pkl'))
 y_test_h = joblib.load(os.path.join(models_dir, 'y_test_height.pkl'))
 
-# Tải mô hình phân loại, LabelEncoder và tập train/test
+# Tải mô hình phân loại, LabelEncoder, scaler và tập train/test
 classification_model = joblib.load(os.path.join(models_dir, 'child_classification_model.pkl'))
 label_encoder = joblib.load(os.path.join(models_dir, 'label_encoder.pkl'))
+scaler = joblib.load(os.path.join(models_dir, 'scaler_classification.pkl'))
 X_test_c = joblib.load(os.path.join(models_dir, 'X_test_classification.pkl'))
 y_test_c = joblib.load(os.path.join(models_dir, 'y_test_classification.pkl'))
 
@@ -86,45 +87,54 @@ plt.show()
 plt.figure(figsize=(10, 6))
 
 # Tạo lưới cho decision boundaries
-wtkg_min, wtkg_max = X_test_c['wtkg'].min() - 1, X_test_c['wtkg'].max() + 1
-htcm_min, htcm_max = X_test_c['htcm'].min() - 1, X_test_c['htcm'].max() + 1
+wtkg_min, wtkg_max = data_class['wtkg'].min() - 1, data_class['wtkg'].max() + 1
+htcm_min, htcm_max = data_class['htcm'].min() - 1, data_class['htcm'].max() + 1
 wtkg_grid, htcm_grid = np.meshgrid(
-    np.linspace(wtkg_min, wtkg_max, 100),
-    np.linspace(htcm_min, htcm_max, 100)
+    np.linspace(wtkg_min, wtkg_max, 500),  # Tăng số điểm lên 500
+    np.linspace(htcm_min, htcm_max, 500)
 )
 
 # Tạo dữ liệu đầu vào cho mô hình (cố định agedays, wtkg_per_agedays, bmi)
-agedays_mean = X_test_c['agedays'].mean()
-wtkg_per_agedays_mean = X_test_c['wtkg_per_agedays'].mean()
-bmi_mean = X_test_c['bmi'].mean()
+agedays_mean = data['agedays'].mean()
+wtkg_per_agedays_grid = wtkg_grid.ravel() / agedays_mean  # Tính wtkg_per_agedays
+bmi_grid = wtkg_grid.ravel() / (htcm_grid.ravel() / 100) ** 2  # Tính bmi
 X_grid = np.c_[np.ones(wtkg_grid.ravel().shape) * agedays_mean,
                wtkg_grid.ravel(),
                htcm_grid.ravel(),
-               wtkg_grid.ravel() / (np.ones(wtkg_grid.ravel().shape) * agedays_mean),  # wtkg_per_agedays
-               np.ones(wtkg_grid.ravel().shape) * bmi_mean]  # bmi
+               wtkg_per_agedays_grid,
+               bmi_grid]
 
 # Chuyển X_grid thành DataFrame với tên cột
 X_grid_df = pd.DataFrame(X_grid, columns=['agedays', 'wtkg', 'htcm', 'wtkg_per_agedays', 'bmi'])
 
-# Dự đoán danh mục trên lưới (giữ nhãn số)
-Z = classification_model.predict(X_grid_df)
+# Chuẩn hóa dữ liệu lưới trước khi dự đoán
+X_grid_scaled = scaler.transform(X_grid_df)
+X_grid_scaled_df = pd.DataFrame(X_grid_scaled, columns=['agedays', 'wtkg', 'htcm', 'wtkg_per_agedays', 'bmi'])
+
+# Dự đoán danh mục trên lưới
+Z = classification_model.predict(X_grid_scaled_df)
 Z = Z.reshape(wtkg_grid.shape)
 
-# Vẽ contour plot cho decision boundaries
-categories = np.unique(y_class_pred_labels)  # Chỉ có 3 lớp: Normal, Overweight, Undernourished
-cmap = plt.get_cmap('tab10')
-plt.contourf(wtkg_grid, htcm_grid, Z, alpha=0.3, cmap=cmap, levels=np.arange(len(label_encoder.classes_) + 1) - 0.5)
+# Vẽ contour plot cho decision boundaries với màu giống hình mẫu
+from matplotlib.colors import ListedColormap
+# Định nghĩa màu cho 3 lớp: xanh nhạt, hồng nhạt, xanh lá nhạt
+cmap = ListedColormap(['#ADD8E6', '#FFB6C1', '#90EE90'])  # Light blue, light pink, light green
+plt.contourf(wtkg_grid, htcm_grid, Z, alpha=0.5, cmap=cmap, levels=np.arange(len(label_encoder.classes_) + 1) - 0.5)
 
-# Vẽ scatter plot cho các điểm dữ liệu
-colors = plt.cm.tab10(np.linspace(0, 1, len(categories)))  # Chỉ cần 3 màu cho 3 lớp
+# Vẽ scatter plot cho các điểm dữ liệu với màu giống hình mẫu
+categories = np.unique(y_class_pred_labels)  # 3 lớp: Normal, Overweight, Undernourished
+# Định nghĩa màu cho điểm dữ liệu: xanh dương, đỏ, xanh lá
+colors = ['blue', 'red', 'green']
 for i, category in enumerate(categories):
     mask = y_class_pred_labels == category
     plt.scatter(data_class[mask]['wtkg'], data_class[mask]['htcm'],
-                c=[colors[i]], label=category, marker='o', alpha=0.6)
+                c=colors[i], label=category, marker='o', alpha=0.6)
 
+# Cài đặt tiêu đề, nhãn trục và legend
 plt.xlabel('Cân nặng (kg)')
 plt.ylabel('Chiều cao (cm)')
-plt.title('Phân loại trẻ dựa trên Cân nặng và Chiều cao (Nữ)')
-plt.legend()
+plt.title('Data with Categorical Response')
+# Tạo legend với tiêu đề "Predicted Regions"
+plt.legend(title="Predicted Regions")
 plt.savefig(os.path.join(figures_dir, 'classification_scatter.png'))
 plt.show()
