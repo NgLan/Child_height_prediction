@@ -1,27 +1,24 @@
-# --- START OF FILE src/z_score_calculator.py ---
 import pandas as pd
 import numpy as np
 import os
 
+from config import WHO_REF_DIR
 # --- Configuration for WHO reference files ---
-BASE_PATH_WHO = os.path.join(os.path.dirname(__file__), "..", "data")
-
 # Length/Height-for-Age (L/HFA) - Age in Days
-LHFA_BOYS_FILE = os.path.join(BASE_PATH_WHO, "WHO-lhfa-boys-zscore-expanded-tables-0-5y.csv")
-LHFA_GIRLS_FILE = os.path.join(BASE_PATH_WHO, "WHO-lhfa-girls-zscore-expanded-tables-0-5y.csv")
+LHFA_BOYS_FILE = os.path.join(WHO_REF_DIR, "WHO-lhfa-boys-zscore-expanded-tables-0-5y.csv")
+LHFA_GIRLS_FILE = os.path.join(WHO_REF_DIR, "WHO-lhfa-girls-zscore-expanded-tables-0-5y.csv")
 
 # Weight-for-Age (WFA) - Age in Days
-WFA_BOYS_FILE = os.path.join(BASE_PATH_WHO, "WHO-wfa-boys-zscore-expanded-tables-0-5y.csv")
-WFA_GIRLS_FILE = os.path.join(BASE_PATH_WHO, "WHO-wfa-girls-zscore-expanded-tables-0-5y.csv")
+WFA_BOYS_FILE = os.path.join(WHO_REF_DIR, "WHO-wfa-boys-zscore-expanded-tables-0-5y.csv")
+WFA_GIRLS_FILE = os.path.join(WHO_REF_DIR, "WHO-wfa-girls-zscore-expanded-tables-0-5y.csv")
 
 # Weight-for-Length (WFL) - Length in cm (typically for < 2 years)
-# Giả sử bạn có file này, nếu không, bạn cần tải về hoặc điều chỉnh logic
-WFL_BOYS_FILE = os.path.join(BASE_PATH_WHO, "WHO-wfl-boys-zscore-expanded-tables-0-5y.csv") # Cần file WFL riêng
-WFL_GIRLS_FILE = os.path.join(BASE_PATH_WHO, "WHO-wfl-girls-zscore-expanded-tables-0-5y.csv")# Cần file WFL riêng
+WFL_BOYS_FILE = os.path.join(WHO_REF_DIR, "WHO-wfl-boys-zscore-expanded-tables-0-5y.csv") 
+WFL_GIRLS_FILE = os.path.join(WHO_REF_DIR, "WHO-wfl-girls-zscore-expanded-tables-0-5y.csv")
 
 # Weight-for-Height (WFH) - Height in cm (typically for >= 2 years)
-WFH_BOYS_FILE = os.path.join(BASE_PATH_WHO, "WHO-wfh-boys-zscore-expanded-tables-0-5y.csv") # Cần file WFH riêng
-WFH_GIRLS_FILE = os.path.join(BASE_PATH_WHO, "WHO-wfh-girls-zscore-expanded-tables-0-5y.csv")# Cần file WFH riêng
+WFH_BOYS_FILE = os.path.join(WHO_REF_DIR, "WHO-wfh-boys-zscore-expanded-tables-0-5y.csv") 
+WFH_GIRLS_FILE = os.path.join(WHO_REF_DIR, "WHO-wfh-girls-zscore-expanded-tables-0-5y.csv")
 
 
 # Column names in your WHO CSV files
@@ -409,5 +406,3 @@ if __name__ == '__main__':
         print(f"y={y_extreme_neg}, L={L_extreme}, M={M_extreme}, S={S_extreme} => Z-score={z_extreme_neg:.2f}")
     else:
         print("Không thể chạy test do thiếu dữ liệu tham chiếu WHO thực tế.")
-
-# --- END OF FILE src/z_score_calculator.py ---

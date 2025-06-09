@@ -1,8 +1,7 @@
-# --- START OF FILE src/data_processing_weight.py ---
 import pandas as pd
 import numpy as np
 
-def load_and_preprocess_data_for_weight(file_path):
+def preprocess_weight_data(file_path):
     """Tải và tiền xử lý dữ liệu để dự đoán cân nặng."""
     df = pd.read_csv(file_path, na_values=['\\N'])
     
@@ -106,4 +105,3 @@ def interpolate_weight_data(df):
         print("CẢNH BÁO (Cân nặng): DataFrame rỗng sau nội suy.")
         
     return result_df
-# --- END OF FILE src/data_processing_weight.py ---

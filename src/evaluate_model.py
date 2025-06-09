@@ -1,174 +1,123 @@
-# # --- START OF FILE src/evaluate_model.py (THỬ NGHIỆM SỬA ĐỔI) ---
-# from darts.metrics import rmse, mae
-# import pandas as pd
-
-# def evaluate_model(model, train_data, test_data, target_name="chiều cao"):
-#     """Đánh giá mô hình dự đoán (chung cho chiều cao/cân nặng)."""
-#     train_series_dict, train_covariates_dict = train_data
-#     test_series_dict, test_covariates_full_dict = test_data # Đây là toàn bộ covariates cho mỗi subjid
-
-#     predictions = {}
-#     successful_predictions = 0
-
-#     for subjid in list(test_series_dict.keys()):
-#         if subjid not in train_series_dict:
-#             continue
-        
-#         current_train_series = train_series_dict[subjid]
-#         current_test_series = test_series_dict[subjid]
-        
-#         # future_covariates cho hàm predict nên là toàn bộ chuỗi covariates
-#         # có sẵn cho khoảng thời gian mà chúng ta muốn dự đoán.
-#         # Darts sẽ tự động chọn phần cần thiết.
-#         future_covariates_for_prediction_period = None
-#         if model.uses_future_covariates:
-#             if subjid not in test_covariates_full_dict or test_covariates_full_dict[subjid] is None:
-#                 # print(f"Cảnh báo (Đánh giá {target_name}, Subjid {subjid}): Mô hình yêu cầu future_covariates nhưng không có hoặc là None. Bỏ qua.")
-#                 continue
-#             future_covariates_for_prediction_period = test_covariates_full_dict[subjid]
-#             # Không cần slice ở đây. Model.predict sẽ xử lý.
-#             # Đảm bảo rằng test_covariates_full_dict[subjid] bao phủ ít nhất khoảng thời gian của current_test_series
-#             if future_covariates_for_prediction_period.end_time() < current_test_series.end_time() or \
-#                future_covariates_for_prediction_period.start_time() > current_test_series.start_time():
-#                 # print(f"Cảnh báo (Đánh giá {target_name}, Subjid {subjid}): Covariates không bao phủ toàn bộ test period. Bỏ qua.")
-#                 # print(f"  Test Series: {current_test_series.time_index[[0,-1]]}")
-#                 # print(f"  Covariates:  {future_covariates_for_prediction_period.time_index[[0,-1]]}")
-#                 continue
-        
-#         try:
-#             if len(current_train_series) < model.lags:
-#                  # print(f"Cảnh báo (Đánh giá {target_name}, Subjid {subjid}): Train series ({len(current_train_series)}) quá ngắn so với lags ({model.lags}). Bỏ qua.")
-#                  continue
-
-#             pred = model.predict(
-#                 n=len(current_test_series),
-#                 series=current_train_series,
-#                 future_covariates=future_covariates_for_prediction_period # Truyền toàn bộ covariates có sẵn
-#             )
-#             predictions[subjid] = pred
-#             successful_predictions += 1
-#         except Exception as e:
-#             print(f"Lỗi khi dự đoán cho subjid {subjid} (Đánh giá {target_name}): {e}")
-#             # import traceback
-#             # traceback.print_exc() # Để xem chi tiết lỗi
-#             # print(f"  Train series len: {len(current_train_series)}, Test series len: {len(current_test_series)}")
-#             # if future_covariates_for_prediction_period is not None:
-#             #     print(f"  Future covariates for pred period start: {future_covariates_for_prediction_period.start_time()}, end: {future_covariates_for_prediction_period.end_time()}, len: {len(future_covariates_for_prediction_period)}")
-#             continue
-            
-#     if successful_predictions == 0:
-#         print(f"Không có dự đoán nào thành công cho mô hình {target_name}.")
-#         return {'Mean_RMSE': float('nan'), 'Mean_MAE': float('nan')}, {}
-
-#     metrics = {'RMSE': [], 'MAE': []}
-#     for subjid_key, pred_series in predictions.items():
-#         if subjid_key in test_series_dict:
-#             actual_series = test_series_dict[subjid_key]
-#             try:
-#                 rmse_val = rmse(actual_series, pred_series)
-#                 mae_val = mae(actual_series, pred_series)
-#                 metrics['RMSE'].append(rmse_val)
-#                 metrics['MAE'].append(mae_val)
-#             except Exception as e_metric:
-#                 # print(f"Lỗi khi tính metrics cho subjid {subjid_key} (Đánh giá {target_name}): {e_metric}")
-#                 continue
-    
-#     if not metrics['RMSE']: 
-#          print(f"Không thể tính toán metrics nào cho {target_name}.")
-#          return {'Mean_RMSE': float('nan'), 'Mean_MAE': float('nan')}, predictions
-
-#     metrics_summary = {
-#         'Mean_RMSE': sum(metrics['RMSE']) / len(metrics['RMSE']) if metrics['RMSE'] else float('nan'),
-#         'Mean_MAE': sum(metrics['MAE']) / len(metrics['MAE']) if metrics['MAE'] else float('nan')
-#     }
-    
-#     return metrics_summary, predictions
-# # --- END OF FILE src/evaluate_model.py ---
-
-# --- START OF FILE src/evaluate_model.py ---
-from darts.metrics import rmse, mae
 import pandas as pd
+from darts import TimeSeries
+import numpy as np
+from sklearn.metrics import mean_squared_error, mean_absolute_error 
 
-def evaluate_model(model, train_data, test_data, target_name="chiều cao"):
-    """Đánh giá mô hình dự đoán (chung cho chiều cao/cân nặng)."""
-    train_series_dict, train_covariates_dict = train_data
-    test_series_dict, test_covariates_full_dict = test_data # Đây là toàn bộ covariates cho mỗi subjid
+def evaluate_model(model, train_data, test_data, target_name):
+    """
+    Hàm này có nhiệm vụ:
+    1. Sử dụng mô hình đã huấn luyện (`model`) để tạo dự đoán trên dữ liệu kiểm tra (`test_data`).
+    2. Áp dụng phương pháp backtesting (cửa sổ trượt).
+    3. Tính toán các chỉ số lỗi (RMSE, MAE) giữa dự đoán và giá trị thực tế.
+    4. Trả về các chỉ số lỗi, các chuỗi dự đoán, và dữ liệu test để vẽ biểu đồ.
+    """
+    train_series_list, _ = train_data
+    test_series_list, test_cov_list = test_data
 
-    predictions = {}
-    successful_predictions = 0
+    predictions_dict = {}
+    
+    min_len_for_forecast_start = model.min_train_series_length
+    
+    print(f"\nĐánh giá cho mô hình '{target_name}'. Yêu cầu start_index = {min_len_for_forecast_start}.")
+    print(f"Tổng số series trong tập test ban đầu: {len(test_series_list)}")
 
-    for subjid in list(test_series_dict.keys()):
-        if subjid not in train_series_dict:
-            continue
+    valid_series_to_eval = []
+    valid_covariates_to_eval = []
+    original_indices_map = [] 
+
+    for i, series in enumerate(test_series_list):
+        if len(series) > min_len_for_forecast_start:
+            valid_series_to_eval.append(series)
+            if test_cov_list:
+                valid_covariates_to_eval.append(test_cov_list[i])
+            original_indices_map.append(i)
+        else:
+            subjid_debug = f"SubjID {series.static_covariates['subjid'].iloc[0]}" if series.has_static_covariates else f"series_index_{i}"
+            print(f"CẢNH BÁO: Loại bỏ series '{subjid_debug}' (index {i}) vì có độ dài {len(series)}, không đủ cho start_index={min_len_for_forecast_start}.")
+
+    if not valid_series_to_eval:
+        print(f"LỖI: Không có series nào trong tập test đủ dài để đánh giá cho mô hình '{target_name}'.")
+        empty_metrics = {'Mean_RMSE': float('nan'), 'Mean_MAE': float('nan')}
+        return empty_metrics, {}, ({}, {})
+
+    print(f"Bắt đầu đánh giá trên {len(valid_series_to_eval)} series hợp lệ (đủ dài).")
+
+    try:
+        list_of_forecast_lists = model.historical_forecasts(
+            series=valid_series_to_eval,
+            future_covariates=valid_covariates_to_eval if valid_covariates_to_eval else None,
+            start=min_len_for_forecast_start, 
+            forecast_horizon=1,
+            stride=1,
+            retrain=False,
+            verbose=False,
+            last_points_only=False
+        )
+    except Exception as e:
+        print(f"\nLỖI KHI DÙNG historical_forecasts: {e}.")
+        import traceback
+        traceback.print_exc()
+        list_of_forecast_lists = []
+
+    if not list_of_forecast_lists:
+        print(f"Không có dự đoán nào thành công cho mô hình {target_name}.")
+        empty_metrics = {'Mean_RMSE': float('nan'), 'Mean_MAE': float('nan')}
+        return empty_metrics, {}, ({}, {})
+
+    # --- GIẢI PHÁP TỐI ƯU: TÍNH METRICS TƯỜNG MINH ---
+    
+    all_rmse_scores = []
+    all_mae_scores = []
+
+    for i, single_child_forecasts in enumerate(list_of_forecast_lists):
+        # Lấy series thực tế tương ứng
+        actual_series = valid_series_to_eval[i]
         
-        current_train_series = train_series_dict[subjid]
-        current_test_series = test_series_dict[subjid]
-        
-        # future_covariates cho hàm predict nên là toàn bộ chuỗi covariates
-        # có sẵn cho khoảng thời gian mà chúng ta muốn dự đoán.
-        # Darts sẽ tự động chọn phần cần thiết.
-        future_covariates_for_prediction_period = None
-        if model.uses_future_covariates:
-            if subjid not in test_covariates_full_dict or test_covariates_full_dict[subjid] is None:
-                # print(f"Cảnh báo (Đánh giá {target_name}, Subjid {subjid}): Mô hình yêu cầu future_covariates nhưng không có hoặc là None. Bỏ qua.")
-                continue
-            future_covariates_for_prediction_period = test_covariates_full_dict[subjid]
-            # Không cần slice ở đây. Model.predict sẽ xử lý.
-            # Đảm bảo rằng test_covariates_full_dict[subjid] bao phủ ít nhất khoảng thời gian của current_test_series
-            if future_covariates_for_prediction_period.end_time() < current_test_series.end_time() or \
-               future_covariates_for_prediction_period.start_time() > current_test_series.start_time():
-                # print(f"Cảnh báo (Đánh giá {target_name}, Subjid {subjid}): Covariates không bao phủ toàn bộ test period. Bỏ qua.")
-                # print(f"  Test Series: {current_test_series.time_index[[0,-1]]}")
-                # print(f"  Covariates:  {future_covariates_for_prediction_period.time_index[[0,-1]]}")
-                continue
-        
-        try:
-            # SỬA ĐỔI Ở ĐÂY: sử dụng model.min_train_series_length thay vì model.lags
-            if len(current_train_series) < model.min_train_series_length:
-                 # print(f"Cảnh báo (Đánh giá {target_name}, Subjid {subjid}): Train series ({len(current_train_series)}) quá ngắn so với model.min_train_series_length ({model.min_train_series_length}). Bỏ qua.")
-                 continue
-
-            pred = model.predict(
-                n=len(current_test_series),
-                series=current_train_series,
-                future_covariates=future_covariates_for_prediction_period # Truyền toàn bộ covariates có sẵn
-            )
-            predictions[subjid] = pred
-            successful_predictions += 1
-        except Exception as e:
-            print(f"Lỗi khi dự đoán cho subjid {subjid} (Đánh giá {target_name}): {e}")
-            # import traceback
-            # traceback.print_exc() # Để xem chi tiết lỗi
-            # print(f"  Train series len: {len(current_train_series)}, Test series len: {len(current_test_series)}")
-            # if future_covariates_for_prediction_period is not None:
-            #     print(f"  Future covariates for pred period start: {future_covariates_for_prediction_period.start_time()}, end: {future_covariates_for_prediction_period.end_time()}, len: {len(future_covariates_for_prediction_period)}")
+        if not single_child_forecasts:
             continue
             
-    if successful_predictions == 0:
-        print(f"Không có dự đoán nào thành công cho mô hình {target_name}.")
-        return {'Mean_RMSE': float('nan'), 'Mean_MAE': float('nan')}, {}
+        # 1. Nối tất cả các đoạn dự đoán lại thành 1 chuỗi dài
+        combined_pred_df = pd.concat([ts.to_dataframe() for ts in single_child_forecasts])
+        combined_pred_df = combined_pred_df[~combined_pred_df.index.duplicated(keep='first')].sort_index()
+        
+        # 2. Cắt chuỗi thực tế để khớp với khoảng thời gian của chuỗi dự đoán
+        actual_df = actual_series.to_dataframe()
+        common_index = actual_df.index.intersection(combined_pred_df.index)
+        
+        y_true = actual_df.loc[common_index].values.flatten()
+        y_pred = combined_pred_df.loc[common_index].values.flatten()
 
-    metrics = {'RMSE': [], 'MAE': []}
-    for subjid_key, pred_series in predictions.items():
-        if subjid_key in test_series_dict:
-            actual_series = test_series_dict[subjid_key]
-            try:
-                rmse_val = rmse(actual_series, pred_series)
-                mae_val = mae(actual_series, pred_series)
-                metrics['RMSE'].append(rmse_val)
-                metrics['MAE'].append(mae_val)
-            except Exception as e_metric:
-                # print(f"Lỗi khi tính metrics cho subjid {subjid_key} (Đánh giá {target_name}): {e_metric}")
-                continue
-    
-    if not metrics['RMSE']: 
-         print(f"Không thể tính toán metrics nào cho {target_name}.")
-         return {'Mean_RMSE': float('nan'), 'Mean_MAE': float('nan')}, predictions
+        if len(y_true) > 0:
+            # 3. Tự tính toán RMSE và MAE bằng sklearn (đáng tin cậy hơn)
+            current_rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+            current_mae = mean_absolute_error(y_true, y_pred)
+            
+            all_rmse_scores.append(current_rmse)
+            all_mae_scores.append(current_mae)
+        
+        # Xây dựng `predictions_dict` để trả về cho việc vẽ biểu đồ
+        original_test_index = original_indices_map[i]
+        corresponding_test_series = test_series_list[original_test_index]
+        subjid = corresponding_test_series.static_covariates['subjid'].iloc[0] if corresponding_test_series.has_static_covariates else f"series_{original_test_index}"
+        
+        # Tạo TimeSeries từ DataFrame đã nối để vẽ biểu đồ
+        predictions_dict[subjid] = TimeSeries.from_dataframe(combined_pred_df)
+
+    # Tính toán giá trị trung bình của các scores
+    mean_rmse = np.mean(all_rmse_scores) if all_rmse_scores else float('nan')
+    mean_mae = np.mean(all_mae_scores) if all_mae_scores else float('nan')
 
     metrics_summary = {
-        'Mean_RMSE': sum(metrics['RMSE']) / len(metrics['RMSE']) if metrics['RMSE'] else float('nan'),
-        'Mean_MAE': sum(metrics['MAE']) / len(metrics['MAE']) if metrics['MAE'] else float('nan')
+        'Mean_RMSE': mean_rmse,
+        'Mean_MAE': mean_mae
     }
     
-    return metrics_summary, predictions
-# --- END OF FILE src/evaluate_model.py ---
+    # Tạo lại test_series_dict để trả về cho việc vẽ biểu đồ
+    test_series_dict = {}
+    for series in test_series_list:
+        subjid = series.static_covariates['subjid'].iloc[0] if series.has_static_covariates else f"series_{len(test_series_dict)}"
+        test_series_dict[subjid] = series
+    
+    test_data_for_plotting = (test_series_dict, {})
+
+    return metrics_summary, predictions_dict, test_data_for_plotting
