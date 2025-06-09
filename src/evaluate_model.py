@@ -49,9 +49,9 @@ def evaluate_model(model, train_data, test_data, target_name):
             start=min_len_for_forecast_start, 
             forecast_horizon=1,
             stride=1,
-            retrain=False,
+            retrain=False, # Không huấn luyện lại mô hình trong quá trình backtesting.
             verbose=False,
-            last_points_only=False
+            last_points_only=False # Trả về toàn bộ chuỗi dự đoán, không chỉ điểm cuối.
         )
     except Exception as e:
         print(f"\nLỖI KHI DÙNG historical_forecasts: {e}.")
@@ -64,7 +64,7 @@ def evaluate_model(model, train_data, test_data, target_name):
         empty_metrics = {'Mean_RMSE': float('nan'), 'Mean_MAE': float('nan')}
         return empty_metrics, {}, ({}, {})
 
-    # --- GIẢI PHÁP TỐI ƯU: TÍNH METRICS TƯỜNG MINH ---
+    # --- TÍNH METRICS ---
     
     all_rmse_scores = []
     all_mae_scores = []
@@ -88,7 +88,7 @@ def evaluate_model(model, train_data, test_data, target_name):
         y_pred = combined_pred_df.loc[common_index].values.flatten()
 
         if len(y_true) > 0:
-            # 3. Tự tính toán RMSE và MAE bằng sklearn (đáng tin cậy hơn)
+            # 3. Tính RMSE và MAE bằng sklearn
             current_rmse = np.sqrt(mean_squared_error(y_true, y_pred))
             current_mae = mean_absolute_error(y_true, y_pred)
             
@@ -98,8 +98,8 @@ def evaluate_model(model, train_data, test_data, target_name):
         # Xây dựng `predictions_dict` để trả về cho việc vẽ biểu đồ
         original_test_index = original_indices_map[i]
         corresponding_test_series = test_series_list[original_test_index]
-        subjid = corresponding_test_series.static_covariates['subjid'].iloc[0] if corresponding_test_series.has_static_covariates else f"series_{original_test_index}"
-        
+        subjid = corresponding_test_series.static_covariates['subjid'].iloc[0]
+
         # Tạo TimeSeries từ DataFrame đã nối để vẽ biểu đồ
         predictions_dict[subjid] = TimeSeries.from_dataframe(combined_pred_df)
 
@@ -115,7 +115,7 @@ def evaluate_model(model, train_data, test_data, target_name):
     # Tạo lại test_series_dict để trả về cho việc vẽ biểu đồ
     test_series_dict = {}
     for series in test_series_list:
-        subjid = series.static_covariates['subjid'].iloc[0] if series.has_static_covariates else f"series_{len(test_series_dict)}"
+        subjid = series.static_covariates['subjid'].iloc[0]
         test_series_dict[subjid] = series
     
     test_data_for_plotting = (test_series_dict, {})

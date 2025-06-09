@@ -5,7 +5,7 @@ import config
 from src.data_processing import preprocess_data, interpolate_data
 from src.train_model import train_model
 from src.evaluate_model import evaluate_model
-from src.visualization import plot_individual_predictions, plot_evaluation_metrics, plot_combined_child_predictions
+from src.visualization import plot_individual_predictions, plot_evaluation_metrics, plot_combined_child_predictions, plot_z_score_trends
 from src.z_score_calculator import load_who_references, analyze_child_growth_from_predictions
 
 def main():
@@ -100,50 +100,90 @@ def main():
     predictions_h = all_predictions.get('height', {})
     predictions_w = all_predictions.get('weight', {})
     
+    all_zscore_analyses = {}
+
     if who_references and predictions_h and predictions_w:
         common_subjids = set(predictions_h.keys()) & set(predictions_w.keys())
+
+        print(f"Tìm thấy {len(predictions_h)} dự đoán chiều cao.")
+        print(f"Tìm thấy {len(predictions_w)} dự đoán cân nặng.")
+        print(f"Tìm thấy {len(common_subjids)} trẻ em có chung cả hai dự đoán.")
+        
         subjids_for_analysis = list(common_subjids)[:config.ZSCORE_ANALYSIS_LIMIT]
         
         for subjid in subjids_for_analysis:
             if subjid in all_subj_sex_map:
-                analyze_child_growth_from_predictions(
-                    subjid, all_subj_sex_map[subjid], 
-                    predictions_h[subjid], predictions_w[subjid], 
-                    who_references, z_score_start_date_ref
+                analysis_df = analyze_child_growth_from_predictions(
+                    subjid, 
+                    all_subj_sex_map[subjid], 
+                    predictions_h.get(subjid), 
+                    predictions_w.get(subjid), 
+                    who_references, 
+                    z_score_start_date_ref
                 )
+                if analysis_df is not None:
+                    all_zscore_analyses[subjid] = analysis_df
+            else:
+                print(f"Cảnh báo: Không tìm thấy giới tính cho subjid {subjid}, bỏ qua phân tích Z-score.")
     else:
-        print("Không thể tính Z-score do thiếu dữ liệu dự đoán hoặc tham chiếu.")
+        print("Không thể tính Z-score do thiếu dữ liệu dự đoán hoặc tham chiếu WHO.")
 
     # --- 4. TRỰC QUAN HÓA ---
     print("\n===== ĐANG TẠO BIỂU ĐỒ =====")
-    # Vẽ biểu đồ cá nhân và metrics cho từng mô hình
     for model_key, model_conf in config.MODEL_CONFIGS.items():
         if model_key in all_predictions and model_key in all_test_data_for_plot:
-            test_series_dict, _ = all_test_data_for_plot[model_key]
-            plot_individual_predictions(
-                all_predictions[model_key], test_series_dict, 
-                model_conf['display_name'], model_conf['unit'], 
-                config.FIGURES_DIR, model_key, limit=config.INDIVIDUAL_PLOTS_LIMIT
-            )
+            predictions = all_predictions[model_key]
+            test_data_for_plot = all_test_data_for_plot[model_key]
+            if predictions and test_data_for_plot:
+                test_series_dict, _ = test_data_for_plot
+                plot_individual_predictions(
+                    predictions, 
+                    test_series_dict, 
+                    model_conf['display_name'], 
+                    model_conf['unit'], 
+                    config.FIGURES_DIR, 
+                    model_key, 
+                    z_score_start_date_ref, # <-- THÊM THAM SỐ MỚI
+                    limit=config.INDIVIDUAL_PLOTS_LIMIT
+                )
         if model_key in all_metrics:
             metrics = all_metrics[model_key]
-            if not pd.isna(metrics.get('Mean_RMSE')):
+            if metrics and not pd.isna(metrics.get('Mean_RMSE')):
                 plot_evaluation_metrics(metrics, config.FIGURES_DIR, model_key)
 
+    # Vẽ biểu đồ Z-score 
+    if all_zscore_analyses:
+        print("\nĐang tạo biểu đồ xu hướng Z-score...")
+        subjids_for_zscore_plot = list(all_zscore_analyses.keys())[:config.INDIVIDUAL_PLOTS_LIMIT]
+        for subjid in subjids_for_zscore_plot:
+            plot_z_score_trends(subjid, all_zscore_analyses[subjid], config.FIGURES_DIR)
+        
     # Vẽ biểu đồ kết hợp
     if 'height' in all_predictions and 'weight' in all_predictions:
         test_data_h = all_test_data_for_plot.get('height')
         test_data_w = all_test_data_for_plot.get('weight')
-        if test_data_h and test_data_w:
+        if test_data_h and test_data_w and all_zscore_analyses:
             test_series_h_dict, _ = test_data_h
             test_series_w_dict, _ = test_data_w
-            common_plot_subjids = list(set(test_series_h_dict.keys()) & set(test_series_w_dict.keys()))
+            
+            # Tìm các subjid có đủ tất cả các loại dữ liệu
+            pred_h_keys = set(predictions_h.keys())
+            pred_w_keys = set(predictions_w.keys())
+            test_h_keys = set(test_series_h_dict.keys())
+            test_w_keys = set(test_series_w_dict.keys())
+            zscore_keys = set(all_zscore_analyses.keys())
+            
+            common_plot_subjids = list(pred_h_keys & pred_w_keys & test_h_keys & test_w_keys & zscore_keys)
             
             if common_plot_subjids:
                 plot_combined_child_predictions(
                     predictions_h, test_series_h_dict,
                     predictions_w, test_series_w_dict,
-                    common_plot_subjids, config.FIGURES_DIR, limit=config.COMBINED_PLOTS_LIMIT
+                    all_zscore_analyses,  
+                    common_plot_subjids, 
+                    config.FIGURES_DIR, 
+                    z_score_start_date_ref,
+                    limit=config.COMBINED_PLOTS_LIMIT
                 )
 
     print("\n===== HOÀN THÀNH TẤT CẢ QUY TRÌNH =====")

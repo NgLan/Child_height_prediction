@@ -1,5 +1,3 @@
-# src/data_processing.py
-
 import pandas as pd
 import numpy as np
 
@@ -16,8 +14,8 @@ def preprocess_data(file_path, target_col, all_covariate_cols):
 
     print(f"Tiền xử lý cho mục tiêu: '{target_col}'")
     
-    # --- BƯỚC 1: XỬ LÝ CÁC CỘT PHI SỐ TRƯỚC (SỬA LỖI Ở ĐÂY) ---
-    # Ánh xạ cột 'sex' từ chuỗi sang số (0/1) trước khi làm bất cứ điều gì khác.
+    # --- BƯỚC 1: XỬ LÝ CÁC CỘT PHI SỐ TRƯỚC ---
+    # Ánh xạ cột 'sex' từ chuỗi sang số (0/1) 
     if 'sex' in df.columns:
         print("Đang ánh xạ cột 'sex' từ chuỗi sang số...")
         df['sex'] = df['sex'].map({'Female': 0, 'Male': 1})
@@ -25,7 +23,6 @@ def preprocess_data(file_path, target_col, all_covariate_cols):
         # chúng sẽ được xử lý ở bước dropna chung bên dưới.
 
     # --- BƯỚC 2: CHUYỂN ĐỔI SANG KIỂU SỐ ---
-    # Bây giờ cột 'sex' đã là số hoặc NaN, ta có thể chuyển đổi hàng loạt.
     all_needed_numeric_cols = list(dict.fromkeys([target_col] + all_covariate_cols + ['agedays']))
 
     for col in all_needed_numeric_cols:
@@ -50,6 +47,7 @@ def preprocess_data(file_path, target_col, all_covariate_cols):
 
     # --- BƯỚC 4: CHUẨN HÓA KIỂU DỮ LIỆU CUỐI CÙNG ---
     # Bây giờ không còn NaN trong các cột này, ta có thể ép kiểu an toàn.
+    df['subjid'] = df['subjid'].astype(int)
     df['agedays'] = df['agedays'].astype('Int64')
     df['sex'] = df['sex'].astype(int)
     
@@ -93,8 +91,8 @@ def interpolate_data(df, target_col, all_covariate_cols, step):
             else:
                 interpolated_values = np.interp(
                     time_points, # Mảng các điểm x mới
-                    group['agedays'].astype(float).values, # Mảng các điểm x cũ
-                    group[col].astype(float).values, # Mảng các điểm y cũ
+                    group['agedays'].values, # Mảng các điểm x cũ
+                    group[col].values, # Mảng các điểm y cũ
                     left=np.nan, # Không ngoại suy
                     right=np.nan
                 )

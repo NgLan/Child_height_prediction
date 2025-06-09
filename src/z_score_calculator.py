@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+from darts import TimeSeries
 
 from config import WHO_REF_DIR
 # --- Configuration for WHO reference files ---
@@ -39,10 +40,10 @@ def load_who_references():
         'lhfa_girls': LHFA_GIRLS_FILE,
         'wfa_boys': WFA_BOYS_FILE,
         'wfa_girls': WFA_GIRLS_FILE,
-        'wfl_boys': WFL_BOYS_FILE, # Weight-for-Length
-        'wfl_girls': WFL_GIRLS_FILE,# Weight-for-Length
-        'wfh_boys': WFH_BOYS_FILE,  # Weight-for-Height
-        'wfh_girls': WFH_GIRLS_FILE, # Weight-for-Height
+        'wfl_boys': WFL_BOYS_FILE, 
+        'wfl_girls': WFL_GIRLS_FILE,
+        'wfh_boys': WFH_BOYS_FILE,  
+        'wfh_girls': WFH_GIRLS_FILE, 
     }
     all_loaded = True
     for key, file_path in files_to_load.items():
@@ -78,10 +79,10 @@ def get_lms_values(indicator_value, ref_df, indicator_col_name):
     Handles cases where indicator_value is outside the range of the reference table.
     """
     if ref_df.empty or indicator_col_name not in ref_df.columns:
-        # print(f"Cảnh báo: DataFrame tham chiếu rỗng hoặc thiếu cột {indicator_col_name}")
+        print(f"Cảnh báo: DataFrame tham chiếu rỗng hoặc thiếu cột {indicator_col_name}")
         return None, None, None
     if L_COL_WHO not in ref_df.columns or M_COL_WHO not in ref_df.columns or S_COL_WHO not in ref_df.columns:
-        # print(f"Cảnh báo: DataFrame tham chiếu thiếu các cột LMS.")
+        print(f"Cảnh báo: DataFrame tham chiếu thiếu các cột LMS.")
         return None, None, None
 
     ref_df = ref_df.sort_values(by=indicator_col_name)
@@ -94,6 +95,7 @@ def get_lms_values(indicator_value, ref_df, indicator_col_name):
     # Exact match
     match = ref_df[ref_df[indicator_col_name] == indicator_value]
     if not match.empty:
+        print(f"Exact match found for {indicator_col_name} = {indicator_value}.")
         return match.iloc[0][L_COL_WHO], match.iloc[0][M_COL_WHO], match.iloc[0][S_COL_WHO]
 
     min_indicator = ref_df[indicator_col_name].min()
@@ -120,17 +122,7 @@ def get_lms_values(indicator_value, ref_df, indicator_col_name):
 # --- Z-score Calculation (as per WHO formula) ---
 def _calculate_sd_val(M, L, S, z_cutoff):
     if pd.isna(M) or pd.isna(L) or pd.isna(S): return np.nan
-    if L == 0:
-        return M * np.exp(S * z_cutoff)
-    base = 1 + L * S * z_cutoff
-    if base <= 0:
-        # Theo WHO Anthro manual, nếu base <= 0, z-score được tính bằng công thức đơn giản hơn
-        # Hoặc giá trị được coi là cực đoan và không tính SD value theo cách này.
-        # For simplicity, returning NaN, but specific guidelines might exist.
-        # print(f"Cảnh báo: Base <=0 khi tính SD value. M={M}, L={L}, S={S}, z_cutoff={z_cutoff}, base={base}")
-        return np.nan
-    # Thêm epsilon nhỏ để tránh lỗi chia cho 0 nếu L rất gần 0
-    return M * (base ** (1 / (L if L != 0 else 1e-9) ))
+    return M * ((1 + L * S * z_cutoff) ** (1 / L))
 
 
 def calculate_zscore_who(y, L, M, S):
@@ -138,38 +130,23 @@ def calculate_zscore_who(y, L, M, S):
         return np.nan
 
     # Step 1: Calculate initial z_ind
-    if L == 0:
-        if y <= 0: return np.nan # y phải dương
-        z_ind = np.log(y / M) / S
-    else:
-        if y <= 0: return np.nan # y phải dương
-        # Thêm epsilon nhỏ để tránh lỗi chia cho 0 nếu L rất gần 0
-        z_ind = (((y / M)**L) - 1) / (S * (L if L != 0 else 1e-9))
+    if y <= 0: return np.nan # y phải dương
+    z_ind = (((y / M)**L) - 1) / (S * L)
     
     if pd.isna(z_ind):
         return np.nan
 
-    # Step 2: Compute final z-score (z_ind_star)
-    # Theo WHO, việc điều chỉnh z-score chỉ áp dụng cho HFA và WFH/WFL
-    # WFA không điều chỉnh z-score > 3 hoặc < -3.
-    # Tuy nhiên, công thức bạn cung cấp là công thức chung, nên tôi sẽ giữ nguyên.
-    # Nếu chỉ áp dụng cho HFA và WFH/WFL, cần thêm tham số 'indicator_type'
-    
-    z_ind_star = z_ind # Mặc định
+    # Step 2: Compute final z-score (z_ind_star)    
+    z_ind_star = z_ind # Mặc định nếu |z_ind| <= 3
 
-    if abs(z_ind) > 3: # Chỉ điều chỉnh nếu z_ind vượt quá +/-3
-        # Các giá trị SD2, SD3, SD-2, SD-3 được tính từ bảng tham chiếu, không phải từ _calculate_sd_val
-        # Tuy nhiên, các file bạn cung cấp có các cột SDxneg/SDx.
-        # Nếu không có, chúng ta mới dùng _calculate_sd_val.
-        # Hiện tại, công thức bạn đưa ra là TÍNH TOÁN chúng.
-        
+    if abs(z_ind) > 3: # Chỉ điều chỉnh nếu z_ind vượt quá +/-3        
         SD3pos = _calculate_sd_val(M, L, S, 3)
         SD3neg = _calculate_sd_val(M, L, S, -3)
-        SD2pos = _calculate_sd_val(M, L, S, 2) # SD2pos
-        SD2neg = _calculate_sd_val(M, L, S, -2) # SD2neg
+        SD2pos = _calculate_sd_val(M, L, S, 2) 
+        SD2neg = _calculate_sd_val(M, L, S, -2) 
 
         if pd.isna(SD3pos) or pd.isna(SD3neg) or pd.isna(SD2pos) or pd.isna(SD2neg):
-            # print(f"Không thể tính SD cutoffs cho y={y}, L={L}, M={M}, S={S}")
+            print(f"Không thể tính SD cutoffs cho y={y}, L={L}, M={M}, S={S}")
             return z_ind # Trả về z_ind ban đầu nếu không tính được SD cutoffs
 
         if z_ind > 3:
@@ -184,7 +161,6 @@ def calculate_zscore_who(y, L, M, S):
                  z_ind_star = -3
             else:
                 z_ind_star = -3 + ((y - SD3neg) / SD23neg)
-        # else trường hợp abs(z_ind) <=3 đã được xử lý bằng z_ind_star = z_ind
             
     return z_ind_star
 
@@ -213,9 +189,7 @@ def get_wfa_zscore(weight_kg, age_days, sex, who_refs):
     if ref_df is None or ref_df.empty: return np.nan
     L, M, S = get_lms_values(age_days, ref_df, AGE_COL_WHO)
     if L is None or M is None or S is None: return np.nan
-    # WFA z-scores are typically not adjusted for extreme values in the same way as HFA/WFH
-    # So we might directly use the initial z_ind if that's the guideline.
-    # For now, using the general formula provided.
+
     return calculate_zscore_who(weight_kg, L, M, S)
 
 def get_wfh_zscore(weight_kg, measured_val, sex, age_days, who_refs):
@@ -226,16 +200,7 @@ def get_wfh_zscore(weight_kg, measured_val, sex, age_days, who_refs):
     """
     # WHO: Length for < 24 months (approx 730 days), Height for >= 24 months
     # Or, Length if recumbent length < 87 cm, Height if standing height >= 87 cm
-    # Chúng ta dùng age_days để quyết định.
-    # Và giả sử các file WFL/WFH của bạn đã có sẵn.
-    
-    # Ngưỡng tuổi để chuyển từ Length sang Height (ví dụ: 2 tuổi = 730 ngày)
-    # Ngưỡng chiều dài/cao để chuyển (ví dụ: 87 cm)
-    # WHO thường dùng chiều dài (Length) cho trẻ dưới 2 tuổi.
-    # Nếu tuổi >= 2 tuổi, dùng chiều cao (Height).
-    # Một số hướng dẫn khác có thể dựa trên chiều dài/cao đo được (ví dụ <87cm dùng length).
-    # Ở đây, chúng ta sẽ dùng tuổi để quyết định bảng nào.
-    
+    # Chúng ta dùng age_days để quyết định.    
     use_length_ref = age_days < 730 # Dưới 2 tuổi (730 ngày) dùng Length
 
     if sex == 1: # Male
@@ -258,91 +223,98 @@ def get_wfh_zscore(weight_kg, measured_val, sex, age_days, who_refs):
 
 # --- Classification Logic (giữ nguyên) ---
 def classify_stunting(hfa_zscore):
-    if pd.isna(hfa_zscore): return "HFA: Unknown"
-    if hfa_zscore < -3: return "HFA: Severely stunted"
-    if hfa_zscore < -2: return "HFA: Stunted"
-    return "HFA: Normal height-for-age"
+    if pd.isna(hfa_zscore): return "Unknown"
+    if hfa_zscore < -3: return "Severely stunted"
+    if hfa_zscore < -2: return "Stunted"
+    return "Normal"
 
 def classify_underweight(wfa_zscore):
-    if pd.isna(wfa_zscore): return "WFA: Unknown"
-    if wfa_zscore < -3: return "WFA: Severely underweight"
-    if wfa_zscore < -2: return "WFA: Underweight"
-    return "WFA: Normal weight-for-age"
+    if pd.isna(wfa_zscore): return "Unknown"
+    if wfa_zscore < -3: return "Severely underweight"
+    if wfa_zscore < -2: return "Underweight"
+    return "Normal"
 
 def classify_wasting_overweight(wfh_zscore):
-    if pd.isna(wfh_zscore): return "WFH/L: Unknown"
+    if pd.isna(wfh_zscore): return "Unknown"
     
     status = []
     # Wasting
-    if wfh_zscore < -3: status.append("WFH/L: Severely wasted (Refer for urgent specialized care)")
-    elif wfh_zscore < -2: status.append("WFH/L: Wasted")
+    if wfh_zscore < -3: status.append("Severely wasted")
+    elif wfh_zscore < -2: status.append("Wasted")
     
     # Overweight/Obesity
-    if wfh_zscore > 3: status.append("WFH/L: Obese")
-    elif wfh_zscore > 2: status.append("WFH/L: Overweight")
-    elif wfh_zscore > 1: status.append("WFH/L: Possible risk of overweight")
+    if wfh_zscore > 3: status.append("Obese")
+    elif wfh_zscore > 2: status.append("Overweight")
+    elif wfh_zscore > 1: status.append("Possible risk of overweight")
 
     if not status:
-        return "WFH/L: Normal weight-for-height/length"
+        return "Normal"
     return "; ".join(status)
 
-# --- Main analysis function to be called from main.py ---
 def analyze_child_growth_from_predictions(subjid, sex, predictions_h_ts, predictions_w_ts, who_refs, start_date_ref):
+    """
+    Phân tích Z-score cho toàn bộ chuỗi thời gian dự đoán và trả về một DataFrame.
+    """
     if who_refs is None:
         print(f"Subjid {subjid}: WHO references not loaded. Skipping Z-score analysis.")
-        return
-
-    print(f"\n--- Z-score Analysis for Subjid: {subjid} (Sex: {'Female' if sex == 0 else 'Male'}) ---")
-
+        return None
+        
     if predictions_h_ts is None or len(predictions_h_ts) == 0 or \
        predictions_w_ts is None or len(predictions_w_ts) == 0:
-        print("Not enough prediction data to analyze.")
-        return
+        print(f"Subjid {subjid}: Not enough prediction data to analyze.")
+        return None
 
-    # Lấy điểm dự đoán cuối cùng
-    # Cân nhắc: Có thể bạn muốn phân tích TẤT CẢ các điểm dự đoán, không chỉ điểm cuối cùng.
-    # Hoặc một điểm cụ thể trong tương lai. Hiện tại, lấy điểm cuối cùng.
-    last_time_h = predictions_h_ts.end_time()
-    predicted_height = predictions_h_ts.values()[-1][0] # Lấy giá trị cuối cùng
+    # 1. Chuyển đổi TimeSeries dự đoán thành DataFrame để dễ xử lý
+    df_h = predictions_h_ts.to_dataframe().rename(columns={'htcm': 'height'})
+    df_w = predictions_w_ts.to_dataframe().rename(columns={'wtkg': 'weight'})
     
-    # Tìm giá trị cân nặng tại cùng thời điểm hoặc gần nhất
-    try:
-        # Cố gắng lấy giá trị tại chính xác thời điểm đó
-        predicted_weight_series_at_time = predictions_w_ts.slice_intersect(predictions_h_ts.slice(last_time_h, last_time_h))
-        if len(predicted_weight_series_at_time) > 0:
-            predicted_weight = predicted_weight_series_at_time.values()[-1][0]
-        else:
-            # Nếu không có, lấy giá trị cuối cùng của chuỗi cân nặng (có thể không hoàn toàn khớp thời gian)
-            print(f"Subjid {subjid}: No exact matching weight prediction for the last height prediction time. Using last available weight.")
-            predicted_weight = predictions_w_ts.values()[-1][0]
-    except Exception as e:
-        print(f"Subjid {subjid}: Error aligning weight prediction: {e}. Using last available weight.")
-        predicted_weight = predictions_w_ts.values()[-1][0] # Fallback
+    # 2. Hợp nhất hai DataFrame dự đoán theo chỉ số thời gian
+    # Dùng 'outer' join để giữ lại tất cả các điểm thời gian, sau đó nội suy các giá trị bị thiếu
+    df_analysis = pd.merge(df_h, df_w, left_index=True, right_index=True, how='outer')
+    df_analysis = df_analysis.interpolate(method='time').dropna()
 
-    agedays = (last_time_h - start_date_ref).days
+    if df_analysis.empty:
+        print(f"Subjid {subjid}: No overlapping prediction data after merge.")
+        return None
+
+    # 3. Tính toán các cột cần thiết cho việc tính Z-score
+    df_analysis['subjid'] = subjid
+    df_analysis['sex'] = sex
+    df_analysis['agedays'] = (df_analysis.index - start_date_ref).days
+
+    # 4. Áp dụng các hàm tính Z-score cho từng hàng trong DataFrame
+    # `apply` sẽ lặp qua từng hàng, lấy giá trị của hàng đó và truyền vào hàm lambda
+    df_analysis['hfa_z'] = df_analysis.apply(
+        lambda row: get_hfa_zscore(row['height'], row['agedays'], row['sex'], who_refs),
+        axis=1
+    )
+    df_analysis['wfa_z'] = df_analysis.apply(
+        lambda row: get_wfa_zscore(row['weight'], row['agedays'], row['sex'], who_refs),
+        axis=1
+    )
+    df_analysis['wfh_z'] = df_analysis.apply(
+        lambda row: get_wfh_zscore(row['weight'], row['height'], row['sex'], row['agedays'], who_refs),
+        axis=1
+    )
+
+    # 5. Áp dụng các hàm phân loại
+    df_analysis['hfa_class'] = df_analysis['hfa_z'].apply(classify_stunting)
+    df_analysis['wfa_class'] = df_analysis['wfa_z'].apply(classify_underweight)
+    df_analysis['wfh_class'] = df_analysis['wfh_z'].apply(classify_wasting_overweight)
     
-    print(f"Analyzing at Agedays: {agedays:.0f}, Predicted Height/Length: {predicted_height:.1f} cm, Predicted Weight: {predicted_weight:.2f} kg")
-
-    hfa_z = get_hfa_zscore(predicted_height, agedays, sex, who_refs)
-    wfa_z = get_wfa_zscore(predicted_weight, agedays, sex, who_refs)
+    # 6. In ra kết quả của điểm phân tích cuối cùng để xem nhanh
+    last_row = df_analysis.iloc[-1]
+    print(f"\n--- Z-score Analysis for Subjid: {subjid} (Sex: {'Female' if sex == 0 else 'Male'}) ---")
+    print(f"Final Point Analysis (Agedays: {last_row['agedays']:.0f}):")
+    print(f"  HFA Z-score: {last_row['hfa_z']:.2f} ({last_row['hfa_class']})")
+    print(f"  WFA Z-score: {last_row['wfa_z']:.2f} ({last_row['wfa_class']})")
+    print(f"  WFH/L Z-score: {last_row['wfh_z']:.2f} ({last_row['wfh_class']})")
     
-    # Đối với WFH/L, chúng ta truyền `agedays` để quyết định dùng bảng Length hay Height
-    wfh_z = get_wfh_zscore(predicted_weight, predicted_height, sex, agedays, who_refs)
-
-    print(f"  HFA Z-score: {hfa_z:.2f}" if not pd.isna(hfa_z) else "  HFA Z-score: N/A")
-    print(f"  WFA Z-score: {wfa_z:.2f}" if not pd.isna(wfa_z) else "  WFA Z-score: N/A")
-    print(f"  WFH/L Z-score: {wfh_z:.2f}" if not pd.isna(wfh_z) else "  WFH/L Z-score: N/A")
-
-    print(f"  Classification - Stunting: {classify_stunting(hfa_z)}")
-    print(f"  Classification - Underweight: {classify_underweight(wfa_z)}")
-    print(f"  Classification - Wasting/Overweight: {classify_wasting_overweight(wfh_z)}")
+    return df_analysis
 
 if __name__ == '__main__':
     print("Testing Z-score calculator module...")
     
-    # Tải dữ liệu tham chiếu WHO thực tế (đảm bảo đường dẫn đúng)
-    # Đặt các file CSV của WHO vào thư mục ../data/who_references/ so với vị trí file này
-    # Hoặc điều chỉnh BASE_PATH_WHO
     actual_who_refs = load_who_references()
 
     if actual_who_refs and not actual_who_refs['lhfa_girls'].empty : # Kiểm tra xem có tải được không
